@@ -108,6 +108,8 @@ export class DesktopWindow extends Context.Service<
     readonly revealOrCreateMain: Effect.Effect<Electron.BrowserWindow, DesktopWindowError>;
     readonly activate: Effect.Effect<void, DesktopWindowError>;
     readonly createMainIfBackendReady: Effect.Effect<void, DesktopWindowError>;
+    /** Open another app window on a renderer route such as `/<environmentId>/<threadId>`. */
+    readonly openWindow: (path: string) => Effect.Effect<void, DesktopWindowError>;
     readonly showConnectingSplash: Effect.Effect<void>;
     readonly handleBackendReady: (httpBaseUrl: URL) => Effect.Effect<void, DesktopWindowError>;
     readonly handleBackendNotReady: Effect.Effect<void>;
@@ -183,6 +185,28 @@ export function resolveInitialMainWindowBounds(
     return persistedBounds;
   }
   return DesktopAppSettings.DEFAULT_MAIN_WINDOW_SIZE;
+}
+
+/** Query flag the renderer reads to tell an extra window from the main one. */
+const SECONDARY_WINDOW_QUERY = "window=secondary";
+
+const CASCADE_OFFSET_PX = 32;
+
+/** Offset from `anchor` so a new window does not hide it, kept on the anchor's display. */
+export function cascadeWindowBounds(anchor: Electron.Rectangle, workArea?: Electron.Rectangle) {
+  const area = workArea ?? Electron.screen.getDisplayMatching(anchor).workArea;
+  const width = Math.min(anchor.width, area.width);
+  const height = Math.min(anchor.height, area.height);
+  const fitAxis = (start: number, size: number, areaStart: number, areaSize: number) => {
+    const next = start + CASCADE_OFFSET_PX;
+    return next + size <= areaStart + areaSize ? next : areaStart;
+  };
+  return {
+    x: fitAxis(anchor.x, width, area.x, area.width),
+    y: fitAxis(anchor.y, height, area.y, area.height),
+    width,
+    height,
+  };
 }
 
 function buildConnectingSplashDataUrl(shouldUseDarkColors: boolean): string {
@@ -363,10 +387,9 @@ export const make = Effect.gen(function* () {
     yield* previewManager.reapplyZoom();
   });
 
-  const createWindow = Effect.fn("desktop.window.createWindow")(function* (): Effect.fn.Return<
-    Option.Option<Electron.BrowserWindow>,
-    DesktopWindowError
-  > {
+  const createWindow = Effect.fn("desktop.window.createWindow")(function* (
+    secondaryPath?: string,
+  ): Effect.fn.Return<Option.Option<Electron.BrowserWindow>, DesktopWindowError> {
     if (yield* Ref.get(desktopState.quitting)) return Option.none();
     yield* previewManager.getBrowserSession();
     const applicationUrl = getDesktopUrl(environment.isDevelopment);
@@ -391,9 +414,19 @@ export const make = Effect.gen(function* () {
         : yield* logWindowWarning("failed to read connected displays; using defaults", {
             cause: displayBoundsResult.cause,
           }).pipe(Effect.as<readonly Electron.Rectangle[]>([]));
-    const initialBounds = resolveInitialMainWindowBounds(persistedBounds, displayBounds);
+    // Extra windows cascade from the main window and never touch its saved bounds.
+    const secondary = secondaryPath !== undefined;
+    const anchorWindow = secondary ? yield* currentMainWindow : Option.none();
+    const initialBounds =
+      Option.isSome(anchorWindow) && !anchorWindow.value.isDestroyed()
+        ? cascadeWindowBounds(anchorWindow.value.getBounds())
+        : resolveInitialMainWindowBounds(persistedBounds, displayBounds);
     const restoredPersistedBounds = persistedBounds !== null && initialBounds === persistedBounds;
-    if (persistedBounds !== null && initialBounds === DesktopAppSettings.DEFAULT_MAIN_WINDOW_SIZE) {
+    if (
+      !secondary &&
+      persistedBounds !== null &&
+      initialBounds === DesktopAppSettings.DEFAULT_MAIN_WINDOW_SIZE
+    ) {
       yield* logWindowWarning("saved main window bounds could not be restored; using defaults");
     }
     if (yield* Ref.get(desktopState.quitting)) return Option.none();
@@ -515,9 +548,10 @@ export const make = Effect.gen(function* () {
         fiber === undefined ? Effect.void : Fiber.join(fiber).pipe(Effect.asVoid),
       ),
     );
-    flushMainWindowBounds = flushBoundsPersist;
+    if (!secondary) flushMainWindowBounds = flushBoundsPersist;
 
-    yield* previewManager.setMainWindow(window);
+    // Previews are tied to one window, so they stay with the main one.
+    if (!secondary) yield* previewManager.setMainWindow(window);
     if (yield* Ref.get(desktopState.quitting)) {
       yield* electronWindow.destroyAll;
       return Option.none();
@@ -696,13 +730,15 @@ export const make = Effect.gen(function* () {
       event.preventDefault();
       window.setTitle(environment.displayName);
     });
-    window.on("resize", scheduleBoundsPersist);
-    window.on("move", scheduleBoundsPersist);
-    window.on("maximize", scheduleBoundsPersist);
-    window.on("unmaximize", scheduleBoundsPersist);
-    window.on("close", () => {
-      runFork(flushBoundsPersist);
-    });
+    if (!secondary) {
+      window.on("resize", scheduleBoundsPersist);
+      window.on("move", scheduleBoundsPersist);
+      window.on("maximize", scheduleBoundsPersist);
+      window.on("unmaximize", scheduleBoundsPersist);
+      window.on("close", () => {
+        runFork(flushBoundsPersist);
+      });
+    }
 
     if (environment.platform === "darwin") {
       // Mouse drivers can deliver Back/Forward as macOS swipe gestures instead of buttons.
@@ -731,11 +767,14 @@ export const make = Effect.gen(function* () {
       developmentLoadRetryFiber = undefined;
       runFork(Fiber.interrupt(retryFiber));
     };
+    const loadUrl = secondary
+      ? `${applicationUrl}?${SECONDARY_WINDOW_QUERY}#${secondaryPath}`
+      : applicationUrl;
     const loadApplication = () => {
       if (window.isDestroyed()) {
         return;
       }
-      void window.loadURL(applicationUrl).catch(() => undefined);
+      void window.loadURL(loadUrl).catch(() => undefined);
     };
     const scheduleDevelopmentLoadRetry = () => {
       if (developmentLoadRetryFiber !== undefined || window.isDestroyed()) {
@@ -855,7 +894,7 @@ export const make = Effect.gen(function* () {
       firstRevealComplete = true;
       pendingMainReveals.delete(window);
       window.webContents.setBackgroundThrottling(true);
-      if (persistedSettings.mainWindowMaximized) window.maximize();
+      if (!secondary && persistedSettings.mainWindowMaximized) window.maximize();
       yield* electronWindow.reveal(window);
       yield* dismissConnectingSplash;
     });
@@ -866,12 +905,12 @@ export const make = Effect.gen(function* () {
     });
 
     loadApplication();
-    if (environment.isDevelopment) {
+    if (environment.isDevelopment && !secondary) {
       window.webContents.openDevTools({ mode: "detach" });
     }
 
     window.on("closed", () => {
-      if (!backendHasStarted) mainClosedDuringStartup = true;
+      if (!backendHasStarted && !secondary) mainClosedDuringStartup = true;
       clearDevelopmentLoadRetry();
       clearBoundsPersist();
       void runPromise(electronWindow.clearMain(Option.some(window)));
@@ -921,6 +960,13 @@ export const make = Effect.gen(function* () {
     if (yield* waitingForBackend) return;
     yield* ensureMain;
   }).pipe(Effect.withSpan("desktop.window.createMainIfBackendReady"));
+
+  const openWindow = Effect.fn("desktop.window.openWindow")(function* (path: string) {
+    if (yield* Ref.get(desktopState.quitting)) return;
+    if (yield* waitingForBackend) return;
+    const window = yield* createWindow(path);
+    if (Option.isSome(window)) yield* logWindowInfo("extra window created", { path });
+  });
 
   const showConnectingSplash = Effect.gen(function* () {
     if (yield* Ref.get(desktopState.quitting)) return;
@@ -1030,6 +1076,7 @@ export const make = Effect.gen(function* () {
       yield* createMainIfBackendReady;
     }).pipe(Effect.withSpan("desktop.window.activate")),
     createMainIfBackendReady,
+    openWindow,
     showConnectingSplash,
     handleBackendReady: Effect.fn("desktop.window.handleBackendReady")(function* (httpBaseUrl) {
       backendHasStarted = true;

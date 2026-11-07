@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 import { resolveStorage } from "./lib/storage";
+import { isSecondaryWindow } from "./lib/threadWindow";
 import {
   EMPTY_PANE_LAYOUT,
   MAX_PANES,
@@ -102,8 +103,15 @@ export const usePaneLayoutStore = create<PaneLayoutStoreState>()(
     {
       name: PANE_LAYOUT_STORAGE_KEY,
       version: PANE_LAYOUT_STORAGE_VERSION,
+      // Windows share localStorage, so an extra window keeps its layout per window instead.
       storage: createJSONStorage(() =>
-        resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined),
+        resolveStorage(
+          typeof window === "undefined"
+            ? undefined
+            : isSecondaryWindow
+              ? window.sessionStorage
+              : window.localStorage,
+        ),
       ),
       partialize: (state) => ({ ...layoutOf(state), sizes: state.sizes }),
       merge: (persisted, current) => {

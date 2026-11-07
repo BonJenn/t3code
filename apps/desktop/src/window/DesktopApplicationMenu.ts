@@ -64,6 +64,11 @@ const runMainContentsCommand = Effect.fn("desktop.menu.runMainContentsCommand")(
   yield* desktopWindow.runMainContentsCommand(command);
 });
 
+const openNewWindow = Effect.gen(function* () {
+  const desktopWindow = yield* DesktopWindow.DesktopWindow;
+  yield* desktopWindow.openWindow("/");
+}).pipe(Effect.withSpan("desktop.menu.openNewWindow"));
+
 const checkForUpdatesFromMenu = Effect.gen(function* () {
   const updates = yield* DesktopUpdates.DesktopUpdates;
   const electronDialog = yield* ElectronDialog.ElectronDialog;
@@ -139,6 +144,9 @@ export const make = Effect.gen(function* () {
     const checkForUpdatesClick = () => {
       runMenuEffect("check-for-updates", handleCheckForUpdatesMenuClick);
     };
+    const newWindowClick = () => {
+      runMenuEffect("new-window", openNewWindow);
+    };
     const settingsClick = () => {
       runMenuEffect("open-settings", dispatchMenuAction("open-settings"));
     };
@@ -190,6 +198,8 @@ export const make = Effect.gen(function* () {
       {
         label: "File",
         submenu: [
+          { label: "New Window", accelerator: "CmdOrCtrl+Alt+N", click: newWindowClick },
+          { type: "separator" as const },
           ...(environment.platform === "darwin"
             ? []
             : [

@@ -1,6 +1,7 @@
 import { GripVerticalIcon, XIcon } from "lucide-react";
 import { useRef } from "react";
 
+import { canOpenThreadWindow, openThreadWindow } from "../../lib/threadWindow";
 import { usePaneLayoutStore } from "../../paneLayoutStore";
 import { Button } from "../ui/button";
 
@@ -11,14 +12,19 @@ function paneIndexAt(x: number, y: number): number | null {
   return pane ? Number(pane.dataset.paneIndex) : null;
 }
 
+function isOutsideWindow(x: number, y: number): boolean {
+  return x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight;
+}
+
 function paneAt(index: number): HTMLElement | null {
   return document.querySelector<HTMLElement>(`[data-pane-index="${index}"]`);
 }
 
 /**
  * Grip and close button in the pane's own header, revealed while the pane is hovered or focused.
- * Dragging the grip over another pane and releasing swaps the two conversations. The highlight is
- * set on the DOM directly, so a drag never re-renders the chats.
+ * Dragging the grip over another pane and releasing swaps the two conversations; releasing outside
+ * the window (desktop app) moves the conversation into a window of its own. The highlight is set on
+ * the DOM directly, so a drag never re-renders the chats.
  */
 export function PaneHeaderControls({ index, onClose }: { index: number; onClose: () => void }) {
   const drag = useRef<{ over: number | null; cursor: string } | null>(null);
@@ -29,7 +35,7 @@ export function PaneHeaderControls({ index, onClose }: { index: number; onClose:
     if (next !== null) paneAt(next)?.setAttribute("data-pane-drop-target", "");
     state.over = next;
   };
-  const finish = (swap: boolean) => {
+  const finish = (commit: boolean, point?: { x: number; y: number }) => {
     const state = drag.current;
     drag.current = null;
     if (!state) return;
@@ -37,7 +43,14 @@ export function PaneHeaderControls({ index, onClose }: { index: number; onClose:
     paneAt(index)?.removeAttribute("data-pane-dragging");
     const target = state.over;
     setOver(state, null);
-    if (swap && target !== null) usePaneLayoutStore.getState().swapPanes(index, target);
+    if (!commit) return;
+    const pane = usePaneLayoutStore.getState().panes[index];
+    if (point && pane && canOpenThreadWindow() && isOutsideWindow(point.x, point.y)) {
+      openThreadWindow(pane.ref);
+      onClose();
+    } else if (target !== null) {
+      usePaneLayoutStore.getState().swapPanes(index, target);
+    }
   };
 
   return (
@@ -63,7 +76,7 @@ export function PaneHeaderControls({ index, onClose }: { index: number; onClose:
           const over = paneIndexAt(event.clientX, event.clientY);
           setOver(state, over === index ? null : over);
         }}
-        onPointerUp={() => finish(true)}
+        onPointerUp={(event) => finish(true, { x: event.clientX, y: event.clientY })}
       >
         <GripVerticalIcon />
       </Button>

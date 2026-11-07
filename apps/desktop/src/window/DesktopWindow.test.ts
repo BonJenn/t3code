@@ -479,6 +479,18 @@ describe("DesktopWindow", () => {
     );
   });
 
+  it("cascades a new window from the anchor and wraps it back onto the display", () => {
+    const workArea = { x: 0, y: 0, width: 1920, height: 1080 };
+    assert.deepEqual(
+      DesktopWindow.cascadeWindowBounds({ x: 100, y: 80, width: 1200, height: 800 }, workArea),
+      { x: 132, y: 112, width: 1200, height: 800 },
+    );
+    assert.deepEqual(
+      DesktopWindow.cascadeWindowBounds({ x: 720, y: 280, width: 1200, height: 800 }, workArea),
+      { x: 0, y: 0, width: 1200, height: 800 },
+    );
+  });
+
   it("rejects renderer navigations whose origin only serializes as null", () => {
     for (const applicationUrl of ["t3code://app/", "t3code-dev://app/"]) {
       assert.isTrue(

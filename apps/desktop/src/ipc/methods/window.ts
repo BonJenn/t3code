@@ -28,6 +28,7 @@ import * as DesktopBackendConfiguration from "../../backend/DesktopBackendConfig
 import * as DesktopBackendPool from "../../backend/DesktopBackendPool.ts";
 import * as DesktopLocalEnvironmentAuth from "../../backend/DesktopLocalEnvironmentAuth.ts";
 import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
+import * as DesktopWindow from "../../window/DesktopWindow.ts";
 import * as DesktopManagedPolicy from "../../app/DesktopManagedPolicy.ts";
 import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
 import * as DesktopWslBackend from "../../wsl/DesktopWslBackend.ts";
@@ -490,5 +491,26 @@ export const checkSystemPermission = DesktopIpc.makeIpcMethod({
     if (environment.platform !== "darwin") return false;
     const check = yield* safariPermissionCheck;
     return yield* Effect.promise(check);
+  }),
+});
+
+const WindowRoutePath = Schema.String.check(
+  Schema.isMaxLength(512),
+  Schema.isPattern(/^\/[A-Za-z0-9._~%/-]*$/),
+);
+
+export const openWindow = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.OPEN_THREAD_WINDOW_CHANNEL,
+  payload: WindowRoutePath,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.window.openWindow")(function* (path, event) {
+    // Only our own app windows may open another; guests and previews cannot.
+    const senderId = event?.sender.id;
+    const fromAppWindow = Electron.BrowserWindow.getAllWindows().some(
+      (window) => !window.isDestroyed() && window.webContents.id === senderId,
+    );
+    if (!fromAppWindow) return;
+    const desktopWindow = yield* DesktopWindow.DesktopWindow;
+    yield* desktopWindow.openWindow(path);
   }),
 });

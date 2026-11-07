@@ -20,3 +20,9 @@ Drag the divider between panes to resize them. Dividers snap to equal sizes and 
 Hover a pane and use the close button in its header to remove it. Close down to one pane to return to the normal single view. Your panes come back when you restart.
 
 Split panes need a window at least as wide as a tablet. Narrower windows show one thread at a time and keep your panes for when the window is wide again.
+
+## Open a thread in its own window
+
+In the desktop app, right-click a thread and choose **Open in new window**, or drag a pane's grip outside the window to move that conversation into a window of its own. **File > New Window** (Cmd/Ctrl+Alt+N) opens an empty one.
+
+Each extra window has its own panes, which are not saved when you close it. The browser preview panel stays in the first window.

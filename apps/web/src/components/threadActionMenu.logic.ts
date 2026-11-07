@@ -4,6 +4,7 @@ import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled"
 export type ThreadActionMenuId =
   | "find"
   | "open-in-pane"
+  | "open-in-window"
   | "new-thread-on-branch"
   | "filter-by-project"
   | "turn-into-project"
@@ -73,6 +74,7 @@ export interface ThreadActionMenuState {
   readonly canFind?: boolean;
   /** Split view can take another pane; only the sidebar offers this. */
   readonly canOpenInPane?: boolean;
+  readonly canOpenInWindow?: boolean;
   readonly branch: string | null;
   readonly projectFilter: {
     readonly label: string;
@@ -105,6 +107,7 @@ export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean
   return ![
     "find",
     "open-in-pane",
+    "open-in-window",
     "new-thread-on-branch",
     "project-settings",
     "mark-unread",
@@ -126,6 +129,9 @@ export function buildThreadActionMenuItems(
       : []),
     ...(state.canOpenInPane
       ? [{ id: "open-in-pane" as const, label: "Open in split pane", icon: "columns-2" }]
+      : []),
+    ...(state.canOpenInWindow
+      ? [{ id: "open-in-window" as const, label: "Open in new window", icon: "app-window" }]
       : []),
     ...(state.branch
       ? [
