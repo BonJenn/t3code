@@ -3364,6 +3364,7 @@ export default function ChatView(props: ChatViewProps) {
                   )
                 : "flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center pl-(--workspace-gutter-start) pr-(--workspace-gutter-end)",
               (pane === null || pane.topLeading) && COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
+              pane?.topTrailing && "pr-36 sm:pr-36",
             )}
           >
             {isElectron && rightPanelControlsAtRoot ? (
